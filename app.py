@@ -1,4 +1,5 @@
 import base64
+import importlib
 import ipaddress
 import json
 import os
@@ -11,6 +12,16 @@ from urllib.parse import quote, urlparse
 
 import requests
 import streamlit as st
+
+try:
+    pyzbar_module = importlib.import_module('pyzbar.pyzbar')
+    qr_decode = pyzbar_module.decode
+    Image = importlib.import_module('PIL.Image')
+    QR_SCAN_AVAILABLE = True
+except ImportError:
+    qr_decode = None
+    Image = None
+    QR_SCAN_AVAILABLE = False
 
 try:
     import whois
@@ -34,7 +45,39 @@ st.info(
     "Checks for URL shorteners, punycode/homograph domains, typosquatting, QR/UPI payment scam patterns, redirect chains, domain age, VirusTotal lookup, and more before you click."
 )
 
-url = st.text_input("Paste a link to scan:", placeholder="https://example.com")
+if QR_SCAN_AVAILABLE:
+    qr_file = st.file_uploader("Upload a QR code image to decode and scan", type=["png", "jpg", "jpeg", "bmp"])
+    if qr_file is not None:
+        try:
+            image = Image.open(qr_file)
+            decoded_items = qr_decode(image)
+            if decoded_items:
+                decoded_texts = [item.data.decode('utf-8', errors='ignore') for item in decoded_items]
+                st.markdown("### QR code results")
+                for decoded_text in decoded_texts:
+                    st.write(f"- {decoded_text}")
+
+                decoded_url = None
+                for decoded_text in decoded_texts:
+                    candidate = decoded_text.strip()
+                    if candidate and urlparse(candidate if urlparse(candidate).scheme else f'https://{candidate}').hostname:
+                        decoded_url = candidate if urlparse(candidate).scheme else f'https://{candidate}'
+                        break
+
+                if decoded_url:
+                    st.success(f"Detected URL from QR code: {decoded_url}")
+                    if st.button("Load decoded URL into scanner"):
+                        st.session_state.scanner_url = decoded_url
+                else:
+                    st.info("QR code decoded text, but no valid URL was detected.")
+            else:
+                st.warning("No QR code was detected in the uploaded image.")
+        except Exception as exc:
+            st.error(f"Unable to decode QR code image: {exc}")
+else:
+    st.warning("QR scan support requires pyzbar and Pillow. Install these packages to enable QR image scanning.")
+
+url = st.text_input("Paste a link to scan:", placeholder="https://example.com", key="scanner_url")
 
 with st.expander("Why scanning links reduces risk"):
     st.write(
@@ -142,7 +185,9 @@ def is_typosquatting(hostname: str, brands: list[str]) -> tuple[bool, str]:
     normalized = normalize_leetspeak(root_label)
     for brand in brands:
         if normalized == brand:
-            return True, f"The domain looks like a typo-squatted version of '{brand}.com'."
+            if root_label != brand:
+                return True, f"The domain looks like a typo-squatted version of '{brand}.com'."
+            return False, ""
         if edit_distance(normalized, brand) == 1 and normalized != brand:
             return True, f"The domain is very similar to '{brand}.com' and may be used for typosquatting."
     return False, ""
@@ -181,6 +226,20 @@ def trace_redirect_chain(url: str) -> tuple[str, list[str], str]:
         return final_url, history + [final_url], ''
     except requests.RequestException as exc:
         return url, [], str(exc)
+
+
+def is_redirect_chain_suspicious(original_url: str, redirect_chain: list[str]) -> bool:
+    if len(redirect_chain) <= 1:
+        return False
+    original_host = get_hostname(original_url)
+    final_host = get_hostname(redirect_chain[-1])
+    if original_host == final_host:
+        return False
+    if original_host.startswith('www.') and original_host[4:] == final_host:
+        return False
+    if final_host.startswith('www.') and final_host[4:] == original_host:
+        return False
+    return True
 
 
 def load_reported_links() -> list[dict]:
@@ -470,9 +529,10 @@ if st.button("Scan Link"):
 
         final_url, redirect_chain, redirect_error = trace_redirect_chain(normalized_url)
         if redirect_chain and len(redirect_chain) > 1:
-            risk_score += 3
-            reasons.append("The link follows multiple redirects, which can hide the final destination.")
-            reasons.append(f"Final destination after redirect chain: {final_url}")
+            if is_redirect_chain_suspicious(normalized_url, redirect_chain):
+                risk_score += 3
+                reasons.append("The link follows multiple suspicious redirects, which can hide the final destination.")
+                reasons.append(f"Final destination after redirect chain: {final_url}")
         elif redirect_error:
             reasons.append(f"Could not fully trace redirects: {redirect_error}")
 
@@ -606,6 +666,8 @@ if st.button("Scan Link"):
         st.caption(f"Risk Score: {risk_percent}%")
     else:
         st.warning("Please enter a URL to scan")
+
+
 
 
 
