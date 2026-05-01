@@ -11,7 +11,13 @@ from urllib.parse import quote, urlparse
 
 import requests
 import streamlit as st
-import whois
+
+try:
+    import whois
+    WHOIS_AVAILABLE = True
+except ImportError:
+    whois = None
+    WHOIS_AVAILABLE = False
 
 st.set_page_config(page_title="SafeLink Scanner", page_icon="🔗")
 
@@ -142,6 +148,8 @@ def is_typosquatting(hostname: str, brands: list[str]) -> tuple[bool, str]:
     return False, ""
 
 def get_domain_age_days(hostname: str) -> tuple[int | None, str]:
+    if not WHOIS_AVAILABLE:
+        return None, "WHOIS unavailable"
     try:
         record = whois.whois(hostname)
         creation_date = record.creation_date
@@ -330,6 +338,9 @@ def get_ip_geolocation(hostname: str) -> dict[str, str]:
 
 def get_whois_details(hostname: str) -> dict[str, str]:
     details = {'domain': hostname, 'registrar': 'unknown', 'creation_date': 'unknown', 'expiration_date': 'unknown', 'updated_date': 'unknown', 'name_servers': [], 'status': [], 'error': ''}
+    if not WHOIS_AVAILABLE:
+        details['error'] = 'WHOIS package unavailable in this environment.'
+        return details
     try:
         record = whois.whois(hostname)
         details['registrar'] = getattr(record, 'registrar', 'unknown') or 'unknown'
@@ -595,6 +606,10 @@ if st.button("Scan Link"):
         st.caption(f"Risk Score: {risk_percent}%")
     else:
         st.warning("Please enter a URL to scan")
+
+
+
+
 
 
 
