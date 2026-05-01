@@ -1,2 +1,2 @@
 streamlit>=1.22
-Flask>=3.0
+
