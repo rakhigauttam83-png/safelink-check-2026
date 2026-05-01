@@ -1,48 +1,43 @@
 import streamlit as st
 
-from safe_link_scanner import scan_url
+st.set_page_config(page_title="SafeLink Scanner", page_icon="🔗")
 
-st.set_page_config(
-    page_title="Safe-Link Scanner",
-    page_icon="🔒",
-    layout="centered",
-    initial_sidebar_state="expanded",
-)
+st.title("🔗 SafeLink Scanner")
+st.write("Check if a link is safe before you click")
 
-st.title("Safe-Link Scanner")
-st.write("Inspect URLs for suspicious patterns, phishing indicators, and weak domain signals.")
+url = st.text_input("Paste a link to scan:", placeholder="https://example.com")
 
-with st.form("scanner_form"):
-    url = st.text_input("Enter a URL to scan", placeholder="https://example.com")
-    submitted = st.form_submit_button("Scan Link")
-
-if submitted:
-    result = scan_url(url)
-    if result.is_safe:
-        st.success("This link appears safe based on the scanner heuristics.")
+if st.button("Scan Link"):
+    if url:
+        risk_score = 0
+        reasons = []
+        
+        if any(word in url.lower() for word in ['free', 'win', 'prize', 'gift', 'lottery']):
+            risk_score += 3
+            reasons.append("Contains spam keywords")
+        if any(tld in url.lower() for tld in ['.tk', '.ml', '.ga', '.cf']):
+            risk_score += 4
+            reasons.append("Uses free/suspicious domain")
+        if url.count('-') > 2:
+            risk_score += 2
+            reasons.append("Too many hyphens in URL")
+        
+        st.divider()
+        
+        if risk_score >= 4:
+            st.error("🚨 HIGH RISK - Do not click this link!")
+        elif risk_score >= 2:
+            st.warning("⚠️ MEDIUM RISK - Be cautious")
+        else:
+            st.success("✅ LOW RISK - Link appears safe")
+        
+        if reasons:
+            st.write("**Detected issues:**")
+            for reason in reasons:
+                st.write(f"- {reason}")
+        
+        st.caption(f"Risk Score: {risk_score}/10")
     else:
-        st.error("Potential risks found. Review the details below.")
+        st.warning("Please enter a URL to scan")
 
-    st.markdown("---")
-    st.subheader("Scan summary")
-    st.write(f"**Normalized URL:** `{result.normalized_url}`")
-    st.write(f"**Danger score:** {result.danger_score}")
-
-    if result.reasons:
-        st.subheader("Detected issues")
-        for reason in result.reasons:
-            st.write(f"- {reason}")
-
-    st.subheader("Checks")
-    cols = st.columns(2)
-    cols[0].write("**Passed checks**")
-    for check in result.passed_checks:
-        cols[0].write(f"- {check}")
-    cols[1].write("**Failed checks**")
-    for check in result.failed_checks:
-        cols[1].write(f"- {check}")
-
-    st.markdown("---")
-    st.info(
-        "This scanner uses static heuristics only. For production use, combine it with live threat intelligence and URL reputation APIs."
-    )
+st.caption("Built for Devpost Hackathon 2026")
