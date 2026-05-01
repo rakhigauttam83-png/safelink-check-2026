@@ -32,24 +32,59 @@ except ImportError:
 
 st.set_page_config(page_title="SafeLink Scanner", page_icon="🔗")
 
-st.title("🔗 SafeLink Scanner")
 st.markdown(
     """
-    ### Scan URLs for phishing, spoofing, and suspicious redirects
-    Know before you click: this tool highlights why a link may be dangerous.
-    """
+    <style>
+    .app-header {
+        background: linear-gradient(135deg, #0c4e8a 0%, #0079c1 100%);
+        border-radius: 24px;
+        padding: 28px;
+        color: white;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.16);
+        margin-bottom: 24px;
+    }
+    .app-header h1 { margin-bottom: 0.2rem; }
+    .app-subtitle { color: #d9edf8; font-size: 1rem; margin-top: 0.4rem; }
+    .card-panel {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 10px 30px rgba(15, 34, 76, 0.08);
+        margin-bottom: 20px;
+    }
+    .badge-high { background: #ff4d4f; color: white; padding: 6px 14px; border-radius: 999px; font-weight: 700; }
+    .badge-medium { background: #faad14; color: white; padding: 6px 14px; border-radius: 999px; font-weight: 700; }
+    .badge-low { background: #52c41a; color: white; padding: 6px 14px; border-radius: 999px; font-weight: 700; }
+    .risk-summary { color: #1f3a72; font-size: 1rem; margin-top: 10px; }
+    .small-note { color: #4f6d94; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
-st.write("Check if a link is safe before you click")
-
-st.info(
-    "Checks for URL shorteners, punycode/homograph domains, typosquatting, QR/UPI payment scam patterns, redirect chains, domain age, VirusTotal lookup, and more before you click."
+st.markdown(
+    """
+    <div class="app-header">
+        <h1>🔗 SafeLink Scanner</h1>
+        <p class="app-subtitle">
+            Scan URLs and QR codes for phishing, spoofing, and suspicious redirects with color-coded insights and instant feedback.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<div class="card-panel"><strong>How it works:</strong> Detects typosquatting, suspicious redirects, SSL issues, QR/UPI scams, and VirusTotal alerts before you click.</div>',
+    unsafe_allow_html=True,
 )
 
 if QR_SCAN_AVAILABLE:
     qr_file = st.file_uploader("Upload a QR code image to decode and scan", type=["png", "jpg", "jpeg", "bmp"])
-    if qr_file is not None:
+    qr_camera = st.camera_input("Or use your camera to scan a QR code")
+    qr_input = qr_camera if qr_camera is not None else qr_file
+
+    if qr_input is not None:
         try:
-            image = Image.open(qr_file)
+            image = Image.open(qr_input)
             decoded_items = qr_decode(image)
             if decoded_items:
                 decoded_texts = [item.data.decode('utf-8', errors='ignore') for item in decoded_items]
@@ -71,7 +106,7 @@ if QR_SCAN_AVAILABLE:
                 else:
                     st.info("QR code decoded text, but no valid URL was detected.")
             else:
-                st.warning("No QR code was detected in the uploaded image.")
+                st.warning("No QR code was detected in the image.")
         except Exception as exc:
             st.error(f"Unable to decode QR code image: {exc}")
 else:
@@ -561,6 +596,21 @@ if st.button("Scan Link"):
 
         st.divider()
 
+        st.markdown(
+            f"""
+            <div class="card-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap: 16px; flex-wrap:wrap;">
+                    <div>
+                        <h2 style="margin:0;">Risk Score: {risk_percent}%</h2>
+                        <p class="risk-summary">{risk_summary}</p>
+                    </div>
+                    <div class="badge-{risk_level.lower()}">{risk_level} risk</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         score_col, detail_col = st.columns([1, 2])
         score_col.metric("Risk Level", f"{risk_percent}%")
         if risk_level == 'High':
@@ -578,9 +628,9 @@ if st.button("Scan Link"):
             detail_col.success(risk_summary)
 
         if reasons:
-            st.write("**Detected issues:**")
+            st.markdown("**Detected issues:**")
             for reason in reasons:
-                st.write(f"- {reason}")
+                st.markdown(f"- {reason}")
 
         if risk_level in {'Medium', 'High'}:
             st.markdown("### Why was this flagged?")
@@ -666,6 +716,10 @@ if st.button("Scan Link"):
         st.caption(f"Risk Score: {risk_percent}%")
     else:
         st.warning("Please enter a URL to scan")
+
+
+
+
 
 
 
