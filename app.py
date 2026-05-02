@@ -31,6 +31,7 @@ except ImportError:
     WHOIS_AVAILABLE = False
 
 VT_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', '').strip()
+VIRUSTOTAL_ENABLED = bool(VT_API_KEY)
 
 st.set_page_config(page_title="SafeLink Scanner", page_icon="🔗")
 
@@ -74,15 +75,18 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+how_it_works = (
+    'Detects typosquatting, suspicious redirects, SSL issues, and QR/UPI scams before you click.'
+)
+if VIRUSTOTAL_ENABLED:
+    how_it_works = (
+        'Detects typosquatting, suspicious redirects, SSL issues, QR/UPI scams, and VirusTotal alerts before you click.'
+    )
+
 st.markdown(
-    '<div class="card-panel"><strong>How it works:</strong> Detects typosquatting, suspicious redirects, SSL issues, QR/UPI scams, and VirusTotal alerts before you click.</div>',
+    f'<div class="card-panel"><strong>How it works:</strong> {how_it_works}</div>',
     unsafe_allow_html=True,
 )
-
-if not VT_API_KEY:
-    st.warning(
-        'VirusTotal API key is not configured. Set VIRUSTOTAL_API_KEY in the environment to enable VirusTotal threat lookups.'
-    )
 
 if QR_SCAN_AVAILABLE:
     qr_file = st.file_uploader("Upload a QR code image to decode and scan", type=["png", "jpg", "jpeg", "bmp"])
@@ -116,9 +120,6 @@ if QR_SCAN_AVAILABLE:
                 st.warning("No QR code was detected in the image.")
         except Exception as exc:
             st.error(f"Unable to decode QR code image: {exc}")
-else:
-    st.warning("QR scan support requires pyzbar and Pillow. Install these packages to enable QR image scanning.")
-
 url = st.text_input("Paste a link to scan:", placeholder="https://example.com", key="scanner_url")
 
 with st.expander("Why scanning links reduces risk"):
@@ -331,9 +332,9 @@ def get_screenshot_url(url: str) -> tuple[str, str]:
         return '', str(exc)
 
 
-def get_virustotal_report(url: str) -> dict:
-    if not VT_API_KEY:
-        return {'error': 'VirusTotal API key is not configured. Set VIRUSTOTAL_API_KEY in the environment.'}
+def get_virustotal_report(url: str) -> dict | None:
+    if not VIRUSTOTAL_ENABLED:
+        return None
 
     headers = {'x-apikey': VT_API_KEY}
     try:
@@ -525,7 +526,7 @@ if st.button("Scan Link"):
             st.stop()
         hostname = get_hostname(normalized_url)
         screenshot_url, screenshot_error = get_screenshot_url(normalized_url)
-        vt_report = get_virustotal_report(normalized_url)
+        vt_report = get_virustotal_report(normalized_url) if VIRUSTOTAL_ENABLED else None
 
         if any(word in normalized_url.lower() for word in suspicious_keywords):
             risk_score += 3
@@ -602,7 +603,7 @@ if st.button("Scan Link"):
         elif redirect_error:
             reasons.append(f"Could not fully trace redirects: {redirect_error}")
 
-        if isinstance(vt_report, dict) and not vt_report.get('error'):
+        if vt_report is not None and isinstance(vt_report, dict) and not vt_report.get('error'):
             vt_malicious = vt_report.get('malicious', 0)
             vt_suspicious = vt_report.get('suspicious', 0)
             vt_total = vt_report.get('total', 0)
@@ -611,7 +612,7 @@ if st.button("Scan Link"):
                 reasons.append(
                     f"VirusTotal cross-check found {vt_malicious} malicious and {vt_suspicious} suspicious flags out of {vt_total} scanners."
                 )
-        elif isinstance(vt_report, dict) and vt_report.get('error'):
+        elif vt_report is not None and isinstance(vt_report, dict) and vt_report.get('error'):
             reasons.append(vt_report['error'])
 
         risk_score = min(risk_score, 10)
@@ -736,6 +737,10 @@ if st.button("Scan Link"):
         st.caption(f"Risk Score: {risk_percent}%")
     else:
         st.warning("Please enter a URL to scan")
+
+
+
+
 
 
 
