@@ -30,6 +30,8 @@ except ImportError:
     whois = None
     WHOIS_AVAILABLE = False
 
+VT_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', '').strip()
+
 st.set_page_config(page_title="SafeLink Scanner", page_icon="🔗")
 
 st.markdown(
@@ -76,6 +78,11 @@ st.markdown(
     '<div class="card-panel"><strong>How it works:</strong> Detects typosquatting, suspicious redirects, SSL issues, QR/UPI scams, and VirusTotal alerts before you click.</div>',
     unsafe_allow_html=True,
 )
+
+if not VT_API_KEY:
+    st.warning(
+        'VirusTotal API key is not configured. Set VIRUSTOTAL_API_KEY in the environment to enable VirusTotal threat lookups.'
+    )
 
 if QR_SCAN_AVAILABLE:
     qr_file = st.file_uploader("Upload a QR code image to decode and scan", type=["png", "jpg", "jpeg", "bmp"])
@@ -325,11 +332,10 @@ def get_screenshot_url(url: str) -> tuple[str, str]:
 
 
 def get_virustotal_report(url: str) -> dict:
-    api_key = os.getenv('VIRUSTOTAL_API_KEY', '').strip()
-    if not api_key:
+    if not VT_API_KEY:
         return {'error': 'VirusTotal API key is not configured. Set VIRUSTOTAL_API_KEY in the environment.'}
 
-    headers = {'x-apikey': api_key}
+    headers = {'x-apikey': VT_API_KEY}
     try:
         url_id = base64.urlsafe_b64encode(url.encode()).decode().strip('=')
         endpoint = f'https://www.virustotal.com/api/v3/urls/{url_id}'
@@ -416,15 +422,40 @@ def get_ip_geolocation(hostname: str) -> dict[str, str]:
     try:
         ip_address = socket.gethostbyname(hostname)
         details['ip'] = ip_address
-        response = requests.get(f'https://ip-api.com/json/{ip_address}', timeout=8)
-        if response.ok:
+        services = [
+            f'https://ip-api.com/json/{ip_address}',
+            f'https://ipwho.is/{ip_address}',
+        ]
+        for service in services:
+            response = requests.get(service, timeout=8)
+            if not response.ok:
+                if response.status_code == 403:
+                    continue
+                details['error'] = f'Geolocation lookup returned status {response.status_code}'
+                continue
             data = response.json()
-            details['country'] = data.get('country', 'unknown')
-            details['region'] = data.get('regionName', 'unknown')
-            details['city'] = data.get('city', 'unknown')
-            details['isp'] = data.get('isp', 'unknown')
-        else:
-            details['error'] = f'Geolocation lookup returned status {response.status_code}'
+            if service.startswith('https://ip-api.com'):
+                if data.get('status') != 'success':
+                    details['error'] = data.get('message', f'Geolocation lookup failed for {service}')
+                    continue
+                details['country'] = data.get('country', 'unknown')
+                details['region'] = data.get('regionName', 'unknown')
+                details['city'] = data.get('city', 'unknown')
+                details['isp'] = data.get('isp', 'unknown')
+                details['error'] = ''
+                return details
+            if service.startswith('https://ipwho.is'):
+                if not data.get('success', False):
+                    details['error'] = data.get('message', f'Geolocation lookup failed for {service}')
+                    continue
+                details['country'] = data.get('country', 'unknown')
+                details['region'] = data.get('region', 'unknown')
+                details['city'] = data.get('city', 'unknown')
+                details['isp'] = data.get('org', data.get('isp', 'unknown'))
+                details['error'] = ''
+                return details
+        if not details['error']:
+            details['error'] = 'Geolocation lookup failed on all fallback services.'
     except Exception as exc:
         details['error'] = str(exc)
     return details
@@ -681,41 +712,34 @@ if st.button("Scan Link"):
                 st.write(f"**City:** {geo_info['city']}")
                 st.write(f"**ISP:** {geo_info['isp']}")
 
-            st.markdown("### WHOIS data")
-            whois_info = get_whois_details(hostname)
-            if whois_info.get('error'):
-                st.error(f"WHOIS lookup failed: {whois_info['error']}")
-            else:
-                st.write(f"**Registrar:** {whois_info['registrar']}")
-                st.write(f"**Creation date:** {whois_info['creation_date']}")
-                st.write(f"**Expiration date:** {whois_info['expiration_date']}")
-                st.write(f"**Last updated:** {whois_info['updated_date']}")
-                st.write(f"**Name servers:** {whois_info['name_servers']}")
-                st.write(f"**Status:** {whois_info['status']}")
-
-            st.markdown("### VirusTotal scan summary")
-            if isinstance(vt_report, dict) and vt_report.get('error'):
-                st.error(f"VirusTotal lookup failed: {vt_report['error']}")
-            else:
-                st.write(f"**Malicious detections:** {vt_report.get('malicious', 0)}")
-                st.write(f"**Suspicious detections:** {vt_report.get('suspicious', 0)}")
-                st.write(f"**Total engines checked:** {vt_report.get('total', 0)}")
-                if vt_report.get('flagged'):
-                    st.write("**Flagged engines:**")
-                    for flagged in vt_report['flagged'][:10]:
-                        st.write(f"- {flagged}")
-                    if len(vt_report['flagged']) > 10:
-                        st.write(f"...and {len(vt_report['flagged']) - 10} more flagged engines.")
-
         st.markdown("### Why opening this link is risky")
         st.write(
             "Links with suspicious keywords, deceptive subdomains, punycode, or redirect parameters often belong to phishing or scam campaigns. "
             "They can redirect you to fake login pages, install malware, or steal personal information."
         )
 
+        st.markdown(
+            "| Note |\n"
+            "|---|\n"
+            "| This information is based on cybersecurity rules and best practices for URL scanning. |"
+        )
+
+        st.markdown("### URL scanning rules")
+        st.markdown(
+            "- Verify URL format and require a valid http or https scheme.\n"
+            "- Check for suspicious keywords, punycode, and excessive subdomains.\n"
+            "- Detect redirect chains, shorteners, and hidden destination parameters.\n"
+            "- Block local/private addresses and suspicious IP-based links.\n"
+            "- Cross-check against threat feeds and report known malicious domains."
+        )
+
         st.caption(f"Risk Score: {risk_percent}%")
     else:
         st.warning("Please enter a URL to scan")
+
+
+
+
 
 
 
